@@ -1,114 +1,64 @@
-
-import csv
 import streamlit as st
-from PIL import Image
 import cv2
-import pandas as pd
+import numpy as np
 import face_recognition
-import numpy as np
-import streamlit as st
-import cv2
-import numpy as np
-import requests
-from datetime import datetime
-import glob
+import pandas as pd
+
 st.set_page_config(
     page_title="Attendance System", page_icon="📊", layout="wide"
 )
-
-st.title("Attendance with Camera")
+st.title("Add New Member")
 st.write("---")
-
-
-saved_df = pd.read_csv("encodings.csv")
-en = saved_df["Encodings"]
-n = saved_df["Persons"]
-
-e = []
-for i in en:
-    e.append(np.fromstring(i[1:-1], dtype=float, sep=' '))
-
-
-def detect_known_faces(img, image_encodings=e, persons=n):
-    height, width = img.shape[:2]
-    resized_img = cv2.resize(img, (int(width/4), int(height/4)))
-    rgb_img = cv2.cvtColor(resized_img, cv2.COLOR_BGR2RGB)
-    fc = []
-    fn = []
-    face_locations = face_recognition.face_locations(rgb_img)
-    face_encodings = face_recognition.face_encodings(
-        rgb_img, face_locations, model="small")
-    for face_encoding, face_location in zip(face_encodings, face_locations):
-        matches = face_recognition.compare_faces(
-            image_encodings, face_encoding)
-        name = "Unknown"
-        if True in matches:
-            first_match_index = matches.index(True)
-            name = persons[first_match_index]
-        fc.append(face_location)
-        fn.append(name)
-    return fc, fn
-
-
-path = " "
-d_l = glob.glob(path+"*.csv")
-for i in range(len(d_l)):
-    d_l[i] = d_l[i].split("\\")[-1].split(".")[0]
-
-
-with st.expander("Create New Attendence Sheet"):
-    name_of_attendence_sheet = st.text_input("Enter Name of Attendence Sheet")
-    if st.button("Create New Attendence Sheet"):
-        now = datetime.now()
-        date = now.strftime("%d-%m-%Y")
-        df = pd.DataFrame(columns=['Date', 'Time', 'Name', 'Status'])
-        name_of_attendence_sheet = name_of_attendence_sheet+" "+str(date)
-        df.to_csv(name_of_attendence_sheet+".csv", index=False)
-
-with st.expander("View Sheets"):
-    date = st.selectbox("Select Sheet", d_l)
-    name_of_attendence_sheet = date
-
+filled = True
 with st.container():
-    c, l = st.columns(2)
-    with c:
-        start = st.button("Start Taking Attendance")
-    with l:
-        stop = st.button("Stop Taking Attendance")
 
-FRAME_WINDOW = st.image([])
-camera = cv2.VideoCapture(0)
+    c1, c2 = st.columns((1, 2))
+    with c1:
+        name = st.text_input("Enter member name")
+        if name == "":
+            filled = False
+    with c2:
+        img_file_buffer = st.camera_input(
+            "Take a picture For new member", key="camera")
 
+        if img_file_buffer is not None:
+            # To read image file buffer with OpenCV:
+            bytes_data = img_file_buffer.getvalue()
+            cv2_img = cv2.imdecode(np.frombuffer(
+                bytes_data, np.uint8), cv2.IMREAD_COLOR)
+            gray = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2GRAY)
+            face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
+            #faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5) 
+            faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+            for (x, y, w, h) in faces:
+                cv2.rectangle(cv2_img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            print("Number of Faces Detected: ", len(faces))
+            if len(faces) > 1:
+                st.write(
+                    "There is more than one face in the image, please take another image.")
+            elif len(faces) < 1:
+                st.write("No face detected")
+            else:
+                st.write("Image Taken, Please Click Save")
 
-# list of column names
-field_names = ['Date', 'Time', 'Name', 'Status']
+    with c1:
+        if st.button("Save Member"):
+            if filled:
+                path = "\\"+name+".jpg"
+                height, width = cv2_img.shape[:2]
+                cv2_resized_img = cv2.resize(
+                    cv2_img, (int(width/2), int(height/2)))
 
-
-now = datetime.now()
-date = now.strftime("%d-%m-%Y")
-time = now.strftime("%H:%M:%S")
-df = pd.read_csv(name_of_attendence_sheet+".csv")
-while start:
-    _, frame = camera.read()
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    face_locations, face_names = detect_known_faces(frame)
-    if face_names:
-        for face_loc, name in zip(face_locations, face_names):
-            y1, x2, y2, x1 = face_loc
-            cv2.putText(frame, name, (x1*4, y1*4 - 40),
-                        cv2.FONT_HERSHEY_DUPLEX, 1, (0, 0, 200), 2)
-            cv2.rectangle(frame, (x1*4, y1*4), (x2*4, y2*4), (0, 0, 200), 4)
-            
-            new_row = {'Date': date, 'Time': time,
-                       'Name': name, 'Status': 'Present'}
-            with open(name_of_attendence_sheet+".csv", 'a') as csv_file:
-                dict_object = csv.DictWriter(csv_file, fieldnames=field_names)
-                dict_object.writerow(new_row)
-    if (cv2.waitKey(20) & 0xFF == ord('q')) or stop:
-        break
-    else:
-        print("no found face")
-    FRAME_WINDOW.image(frame)
-    if stop:
-        camera.release()
-        camera.DestroyAllWindows()
+                cv2.imwrite(path, cv2_resized_img)
+                img = face_recognition.load_image_file(path)
+                img_encoding = face_recognition.face_encodings(img)[0]
+                df = pd.read_csv("encodings.csv")
+                en = df["Encodings"].tolist()
+                n = df["Persons"].tolist()
+                en.append(img_encoding)
+                n.append(name)
+                df = pd.DataFrame({"Persons": n, "Encodings": en})
+                df.to_csv("encodings.csv", index=False)
+                st.write("Member Added")
+            else:
+                st.warning("Please Enter Member Name")
